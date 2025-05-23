@@ -12,16 +12,16 @@
 #include "VoiceManager.h"
 
 // Objetos de Audio para polifonía (3 voces)
-AudioSynthWaveform waveform[3];
-AudioEffectEnvelope envelope[3]; // Añadido: array de envelopes
-AudioEffectEnvelope* env[3];     // Añadido: punteros a envelopes
+AudioSynthWaveform waveform[4];
+AudioEffectEnvelope envelope[4]; // Añadido: array de envelopes
+AudioEffectEnvelope* env[4];     // Añadido: punteros a envelopes
 
 AudioOutputI2S audioOutput;
 AudioControlSGTL5000 audioShield;
 AudioMixer4 mixer;
 AudioMixer4 mixerOut;
-VoiceManager<3> poly(mixer);
-ButtonNoteController<VoiceManager<3>> btnController(&poly);
+VoiceManager<4> poly(mixer);
+ButtonNoteController<VoiceManager<4>> btnController(&poly);
 
 // Efectos y filtros
 HighPassFilterManager highPassFilter;
@@ -36,14 +36,17 @@ ReverbManager reverb;
 ReverbManager reverbParameters;
 
 // Conexiones fijas: cada voz -> filtros -> mixer
-AudioConnection* patchCordInit[3];
-AudioConnection* patchCordEnvToHP[3];
-AudioConnection* patchCordEnvToLP[3];
-AudioConnection* patchCordHPToMixer[3];
-AudioConnection* patchCordLPToMixer[3];
+AudioConnection* patchCordInit[4];
+AudioConnection* patchCordEnvToHP[4];
+AudioConnection* patchCordEnvToLP[4];
+AudioConnection* patchCordHPToMixer[4];
+AudioConnection* patchCordLPToMixer[4];
+
+float currentVolume = 0.5f, targetVolume = 0.5f; // Volumen inicial
+long envAttack = 1000, envDecay = 1000, envSustain = 5000, envRelease = 2000; // valores *10 para más precisión
 
 void setupVoices() {
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         env[i] = &envelope[i];
         patchCordInit[i]     = new AudioConnection(waveform[i], 0, *env[i], 0);
         patchCordEnvToHP[i]  = new AudioConnection(*env[i], 0, *highPassFilter.getFilter(), 0);
@@ -127,13 +130,97 @@ void actualizarConexiones() {
   }
 }
 
+void updateVolumeFromPot() {
+    int potValue = analogRead(0); // Lee el pin A0
+    float target = map(potValue, 0, 1023, 0, 80) / 100.0f; // 0.0 - 0.8
+    const float alpha = 0.15f; // Suavidad EMA (0.1 muy suave, 0.3 más rápido)
+    currentVolume = alpha * target + (1.0f - alpha) * currentVolume;
+    if (currentVolume < 0.01f) currentVolume = 0.01f;
+    if (currentVolume > 0.8f) currentVolume = 0.8f;
+    audioShield.volume(currentVolume);
+
+    /*
+    Serial.print("Volumen: ");
+    Serial.print(currentVolume, 2);
+    Serial.print(" (");
+    Serial.print((int)(currentVolume * 100));
+    Serial.println(")");
+    */
+}
+
+void updateEnvelopeFromPots() {
+    int potAttack  = analogRead(1); // A1
+    int potDecay   = analogRead(2); // A2
+    int potSustain = analogRead(5); // A5
+    int potRelease = analogRead(4); // A4
+
+    long targetAttack  = map(potAttack,  0, 1023, 10, 30000);   // 1ms - 3s (x10)
+    long targetDecay   = map(potDecay,   0, 1023, 10, 30000);   // 1ms - 3s (x10)
+    long targetSustain = map(potSustain, 0, 1023, 0, 10000);    // 0 - 100% (x100)
+    long targetRelease = map(potRelease, 0, 1023, 10, 60000);   // 1ms - 6s (x10)
+
+    const float alpha = 0.15f; // Suavidad EMA
+
+    envAttack  = alpha * targetAttack  + (1.0f - alpha) * envAttack;
+    envDecay   = alpha * targetDecay   + (1.0f - alpha) * envDecay;
+    envSustain = alpha * targetSustain + (1.0f - alpha) * envSustain;
+    envRelease = alpha * targetRelease + (1.0f - alpha) * envRelease;
+
+    for (int i = 0; i < 4; ++i) {
+        envelope[i].attack(envAttack / 1000.0f);   // ms -> segundos
+        envelope[i].decay(envDecay / 1000.0f);
+        envelope[i].sustain(envSustain / 10000.0f); // 0.0 - 1.0
+        envelope[i].release(envRelease / 1000.0f);
+    }
+
+    /*
+    Serial.print("Env: A=");
+    Serial.print(envAttack / 10);    // ms
+    Serial.print(" D=");
+    Serial.print(envDecay / 10);     // ms
+    Serial.print(" S=");
+    Serial.print(envSustain / 100);  // %
+    Serial.print(" R=");
+    Serial.println(envRelease / 10); // ms
+    */
+}
+
+void printAudioMemoryUsage() {
+  Serial.print("AudioMemoryUsage: ");
+  Serial.print(AudioMemoryUsage());
+  Serial.print(" / ");
+  Serial.print(AudioMemoryUsageMax());
+  Serial.println(" bloques usados");
+}
+
+void printButtonStates() {
+    int stateDo  = digitalRead(2);
+    int stateMi  = digitalRead(3);
+    int stateSol = digitalRead(4);
+    int stateLa  = digitalRead(5);
+
+    Serial.print("Botones: DO=");
+    Serial.print(stateDo == LOW ? "ON" : "OFF");
+    Serial.print(" MI=");
+    Serial.print(stateMi == LOW ? "ON" : "OFF");
+    Serial.print(" SOL=");
+    Serial.print(stateSol == LOW ? "ON" : "OFF");
+    Serial.print(" LA=");
+    Serial.println(stateLa == LOW ? "ON" : "OFF");
+}
+
 void setup() {
-  Serial.begin(9600);
-  AudioMemory(180);
+  Serial.begin(115200);
+  AudioMemory(100);
   audioShield.enable();
-  audioShield.volume(0.5);
+  audioShield.volume(currentVolume);
 
   setupVoices();
+
+  for (int i = 0; i < 4; ++i) {
+    mixer.gain(i, 0.5f);
+    mixerOut.gain(i, 0.5f);
+  }
 
   // Inicializa parámetros
   highPassFilterParameters.setParams(highPassFilter.GetCutoff(), highPassFilter.GetResonance());
@@ -142,17 +229,21 @@ void setup() {
   flangerParameters.setParams(flanger.getOffset(), flanger.getDepth(), flanger.getRate());
   reverbParameters.setParams(reverb.getRoomSize(), reverb.getDamping());
 
-  actualizarConexiones(); // Conecta todo según estado de efectos
+  actualizarConexiones(); // Conecta todo según estado de efectos.
 }
 
 void loop() {
   btnController.update();
+  updateEnvelopeFromPots();
+  updateVolumeFromPot();
+
+  printButtonStates();
 
   // Filtro paso alto (bypass modificando corte)
   if (pasoAltoActivo) {
     highPassFilter.setParams(highPassFilterParameters.GetCutoff(), highPassFilterParameters.GetResonance());
   } else {
-    highPassFilter.setParams(0.0, 0.7);
+    highPassFilter.setParams(0.0, 0.5);
   }
 
   // Filtro paso bajo
@@ -166,4 +257,13 @@ void loop() {
   bitcrusher.setParams(bitcrusherParameters.GetBits(), bitcrusherParameters.GetSampleRate());
   flanger.setParams(flangerParameters.getOffset(), flangerParameters.getDepth(), flangerParameters.getRate());
   reverb.setParams(reverbParameters.getRoomSize(), reverbParameters.getDamping());
+
+  // Imprime uso de memoria de audio cada segundo
+  /*
+  static unsigned long lastPrint = 0;
+  if (millis() - lastPrint > 1000) {
+    printAudioMemoryUsage();
+    lastPrint = millis();
+  }
+  */
 }

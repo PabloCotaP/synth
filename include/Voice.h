@@ -7,14 +7,14 @@
 class Voice {
 public:
     Voice() : waveform(), envelope(), patch(waveform, 0, *(envelope.getEnvelope()), 0), active(false), note(0) {
-        waveform.begin(WAVEFORM_SINE);
+        waveform.begin(SINE);
         waveform.amplitude(0.0);
     }
 
-    void noteOn(uint8_t midiNote, int waveformType = WAVEFORM_SINE) {
+    void noteOn(uint8_t midiNote, int waveformType = SINE) {
         waveform.begin(waveformType);
         waveform.frequency(midiToFreq(midiNote));
-        waveform.amplitude(0.7);
+        waveform.amplitude(1.0);
         envelope.getEnvelope()->noteOn();
         note = midiNote;
         active = true;
@@ -22,7 +22,6 @@ public:
 
     void noteOff() {
         envelope.getEnvelope()->noteOff();
-        waveform.amplitude(0.0);
         active = false;
     }
 

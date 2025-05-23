@@ -11,13 +11,15 @@ public:
         pinMode(pinDo, INPUT_PULLUP);
         pinMode(pinMi, INPUT_PULLUP);
         pinMode(pinSol, INPUT_PULLUP);
-        lastStateDo = lastStateMi = lastStateSol = HIGH;
+        pinMode(pinLa, INPUT_PULLUP);
+        lastStateDo = lastStateMi = lastStateSol = lastStateLa = HIGH;
     }
 
     void update() {
         int stateDo  = digitalRead(pinDo);
         int stateMi  = digitalRead(pinMi);
         int stateSol = digitalRead(pinSol);
+        int stateLa  = digitalRead(pinLa);
 
         if (stateDo == LOW && lastStateDo == HIGH) poly->noteOn(60);
         if (stateDo == HIGH && lastStateDo == LOW) poly->noteOff(60);
@@ -28,9 +30,14 @@ public:
         if (stateSol == LOW && lastStateSol == HIGH) poly->noteOn(67);
         if (stateSol == HIGH && lastStateSol == LOW) poly->noteOff(67);
 
+        if (stateLa == LOW && lastStateLa == HIGH) poly->noteOn(69);
+        if (stateLa == HIGH && lastStateLa == LOW) poly->noteOff(69);
+
         lastStateDo  = stateDo;
         lastStateMi  = stateMi;
         lastStateSol = stateSol;
+        lastStateLa  = stateLa;
+
     }
 
 private:
@@ -38,5 +45,6 @@ private:
     const uint8_t pinDo  = 2;
     const uint8_t pinMi  = 3;
     const uint8_t pinSol = 4;
-    int lastStateDo, lastStateMi, lastStateSol;
+    const uint8_t pinLa = 5;
+    int lastStateDo, lastStateMi, lastStateSol, lastStateLa;
 };
