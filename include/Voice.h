@@ -32,7 +32,6 @@ public:
     AudioSynthWaveform* getWaveform() { return &waveform; }
 
 private:
-private:
     AudioSynthWaveform waveform;
     EnvelopeManager envelope;
     AudioConnection patch;

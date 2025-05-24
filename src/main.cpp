@@ -6,8 +6,6 @@
 #include "BitCrusher.h"
 #include "Flanger.h"
 #include "Reverb.h"
-#include "Oscillator.h"
-#include "Polyphony.h"
 #include "Voice.h"
 #include "VoiceManager.h"
 
@@ -20,8 +18,8 @@ AudioOutputI2S audioOutput;
 AudioControlSGTL5000 audioShield;
 AudioMixer4 mixer;
 AudioMixer4 mixerOut;
-VoiceManager<4> poly(mixer);
-ButtonNoteController<VoiceManager<4>> btnController(&poly);
+VoiceManager<4> vManager(mixer);
+ButtonNoteController<VoiceManager<4>> btnController(&vManager);
 
 // Efectos y filtros
 HighPassFilterManager highPassFilter;
