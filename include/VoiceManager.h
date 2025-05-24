@@ -7,7 +7,7 @@ class VoiceManager {
 public:
     VoiceManager(AudioMixer4& mixer) : mixer(mixer) {
         for (int i = 0; i < NUM_VOICES; ++i) {
-            mixer.gain(i, 0.15);
+            mixer.gain(i, 0.2);
             patch[i] = new AudioConnection(*voices[i].getEnvelope(), 0, mixer, i);
         }
     }

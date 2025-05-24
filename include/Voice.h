@@ -22,6 +22,7 @@ public:
 
     void noteOff() {
         envelope.getEnvelope()->noteOff();
+        waveform.amplitude(0.0);
         active = false;
     }
 

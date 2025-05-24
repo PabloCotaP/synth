@@ -152,7 +152,7 @@ void updateEnvelopeFromPots() {
     int potAttack  = analogRead(1); // A1
     int potDecay   = analogRead(2); // A2
     int potSustain = analogRead(5); // A5
-    int potRelease = analogRead(4); // A4
+    int potRelease = analogRead(6); // A4
 
     long targetAttack  = map(potAttack,  0, 1023, 10, 30000);   // 1ms - 3s (x10)
     long targetDecay   = map(potDecay,   0, 1023, 10, 30000);   // 1ms - 3s (x10)
@@ -213,14 +213,11 @@ void setup() {
   Serial.begin(115200);
   AudioMemory(100);
   audioShield.enable();
-  audioShield.volume(currentVolume);
+  audioShield.volume(0.5f);
+  mixerOut.gain(0, 0.8f);
 
   setupVoices();
 
-  for (int i = 0; i < 4; ++i) {
-    mixer.gain(i, 0.5f);
-    mixerOut.gain(i, 0.5f);
-  }
 
   // Inicializa parámetros
   highPassFilterParameters.setParams(highPassFilter.GetCutoff(), highPassFilter.GetResonance());
@@ -234,8 +231,8 @@ void setup() {
 
 void loop() {
   btnController.update();
-  updateEnvelopeFromPots();
-  updateVolumeFromPot();
+  //updateVolumeFromPot();
+  //updateEnvelopeFromPots();
 
   printButtonStates();
 
@@ -257,13 +254,4 @@ void loop() {
   bitcrusher.setParams(bitcrusherParameters.GetBits(), bitcrusherParameters.GetSampleRate());
   flanger.setParams(flangerParameters.getOffset(), flangerParameters.getDepth(), flangerParameters.getRate());
   reverb.setParams(reverbParameters.getRoomSize(), reverbParameters.getDamping());
-
-  // Imprime uso de memoria de audio cada segundo
-  /*
-  static unsigned long lastPrint = 0;
-  if (millis() - lastPrint > 1000) {
-    printAudioMemoryUsage();
-    lastPrint = millis();
-  }
-  */
 }
