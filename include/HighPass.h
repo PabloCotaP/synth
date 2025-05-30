@@ -14,9 +14,9 @@ public:
         : filter()
     {
         filter.frequency(cutoff);
-        cutoff = cutoff;
+        this->cutoff = cutoff;
         filter.resonance(resonance);
-        resonance = resonance;
+        this->resonance = resonance;
     }
 
     // Acceso al objeto filtro para conexiones de audio
@@ -25,9 +25,9 @@ public:
     // Cambia los parámetros del filtro en tiempo real
     void setParams(float cutoff, float resonance) {
         filter.frequency(cutoff);
-        cutoff = cutoff;
+        this->cutoff = cutoff;
         filter.resonance(resonance);
-        resonance = resonance;
+        this->resonance = resonance;
     }
 
     float GetCutoff() {

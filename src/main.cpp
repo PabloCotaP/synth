@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Audio.h>
-#include "BtnNote.h"
+#include <USBHost_t36.h>
+#include "MidiNote.h"
 #include "HighPass.h"
 #include "LowPass.h"
 #include "BitCrusher.h"
@@ -9,22 +10,40 @@
 #include "Voice.h"
 #include "VoiceManager.h"
 
-// Objetos de Audio para polifonía (3 voces)
-AudioSynthWaveform waveform[4];
-AudioEffectEnvelope envelope[4]; // Añadido: array de envelopes
-AudioEffectEnvelope* env[4];     // Añadido: punteros a envelopes
+#define PIN_BTN_PASO_ALTO    0
+#define PIN_BTN_PASO_BAJO    1
+#define PIN_BTN_BITCRUSHER   2
+#define PIN_BTN_FLANGER      3
+#define PIN_BTN_REVERB       4
+
+// Variables para guardar el último estado de cada botón
+int lastBtnPasoAlto    = HIGH;
+int lastBtnPasoBajo    = HIGH;
+int lastBtnBitcrusher  = HIGH;
+int lastBtnFlanger     = HIGH;
+int lastBtnReverb      = HIGH;
+
+USBHost myusb;
+MIDIDevice midi1(myusb);
+
+// Objetos de Audio para polifonía (4 voces)
+AudioSynthWaveform       waveform1, waveform2, waveform3, waveform4;
+AudioEffectEnvelope      envelope1, envelope2, envelope3, envelope4;
+
+AudioSynthWaveform* wavePtr[4] = { &waveform1, &waveform2, &waveform3, &waveform4 };
+AudioEffectEnvelope* env[4] = { &envelope1, &envelope2, &envelope3, &envelope4 };
 
 AudioOutputI2S audioOutput;
 AudioControlSGTL5000 audioShield;
 AudioMixer4 mixer;
 AudioMixer4 mixerOut;
-VoiceManager<4> vManager(mixer);
-ButtonNoteController<VoiceManager<4>> btnController(&vManager);
+VoiceManager<4> vManager(mixer, wavePtr, env);
+MidiNoteController<VoiceManager<4>> midiController(&vManager, midi1);
 
 // Efectos y filtros
-HighPassFilterManager highPassFilter;
+HighPassFilterManager highPassFilter[4];
 HighPassFilterManager highPassFilterParameters;
-LowPassFilterManager lowPassFilter;
+LowPassFilterManager lowPassFilter[4];
 LowPassFilterManager lowPassFilterParameters;
 BitCrusherManager bitcrusher;
 BitCrusherManager bitcrusherParameters;
@@ -39,18 +58,18 @@ AudioConnection* patchCordEnvToHP[4];
 AudioConnection* patchCordEnvToLP[4];
 AudioConnection* patchCordHPToMixer[4];
 AudioConnection* patchCordLPToMixer[4];
+AudioConnection* patchCordEnvToMixer[4];
 
-float currentVolume = 0.5f, targetVolume = 0.5f; // Volumen inicial
+float currentVolume = 0.6f, targetVolume = 0.6f; // Volumen inicial
 long envAttack = 1000, envDecay = 1000, envSustain = 5000, envRelease = 2000; // valores *10 para más precisión
 
 void setupVoices() {
     for (int i = 0; i < 4; ++i) {
-        env[i] = &envelope[i];
-        patchCordInit[i]     = new AudioConnection(waveform[i], 0, *env[i], 0);
-        patchCordEnvToHP[i]  = new AudioConnection(*env[i], 0, *highPassFilter.getFilter(), 0);
-        patchCordEnvToLP[i]  = new AudioConnection(*env[i], 0, *lowPassFilter.getFilter(), 0);
-        patchCordHPToMixer[i]= new AudioConnection(*highPassFilter.getFilter(), 2, mixer, i);
-        patchCordLPToMixer[i]= new AudioConnection(*lowPassFilter.getFilter(), 1, mixer, i);
+        patchCordInit[i]     = new AudioConnection(*wavePtr[i], 0, *env[i], 0);
+        patchCordEnvToHP[i]  = new AudioConnection(*env[i], 0, *highPassFilter[i].getFilter(), 0);
+        patchCordEnvToLP[i]  = new AudioConnection(*env[i], 0, *lowPassFilter[i].getFilter(), 0);
+        patchCordHPToMixer[i]= new AudioConnection(*highPassFilter[i].getFilter(), 2, mixer, i);
+        patchCordLPToMixer[i]= new AudioConnection(*lowPassFilter[i].getFilter(), 1, mixer, i);
     }
 }
 
@@ -65,13 +84,14 @@ AudioConnection* patchReverbToMixerOut = nullptr;
 AudioConnection* patchFlangerToMixerOut = nullptr;
 AudioConnection* patchMixerDirectToOut = nullptr;
 
+
 // Conexión mixerOut a salida estéreo
 AudioConnection patchMixerOutToOutL(mixerOut, 0, audioOutput, 0);
 AudioConnection patchMixerOutToOutR(mixerOut, 0, audioOutput, 1);
 
 // Estado de efectos
-bool pasoAltoActivo = true;
-bool pasoBajoActivo = true;
+bool pasoAltoActivo = false;
+bool pasoBajoActivo = false;
 bool bitcrusherActivo = false;
 bool flangerActivo = false; 
 bool reverbActivo = false;
@@ -129,28 +149,20 @@ void actualizarConexiones() {
 }
 
 void updateVolumeFromPot() {
-    int potValue = analogRead(0); // Lee el pin A0
+    int potValue = analogRead(1); // Lee el pin A1 (15)
     float target = map(potValue, 0, 1023, 0, 80) / 100.0f; // 0.0 - 0.8
     const float alpha = 0.15f; // Suavidad EMA (0.1 muy suave, 0.3 más rápido)
     currentVolume = alpha * target + (1.0f - alpha) * currentVolume;
     if (currentVolume < 0.01f) currentVolume = 0.01f;
     if (currentVolume > 0.8f) currentVolume = 0.8f;
     audioShield.volume(currentVolume);
-
-    /*
-    Serial.print("Volumen: ");
-    Serial.print(currentVolume, 2);
-    Serial.print(" (");
-    Serial.print((int)(currentVolume * 100));
-    Serial.println(")");
-    */
 }
 
 void updateEnvelopeFromPots() {
-    int potAttack  = analogRead(1); // A1
-    int potDecay   = analogRead(2); // A2
-    int potSustain = analogRead(5); // A5
-    int potRelease = analogRead(6); // A4
+    int potAttack  = analogRead(0); // A0 (14)
+    int potDecay   = analogRead(2); // A2 (16)
+    int potSustain = analogRead(3); // A3 (17) 
+    int potRelease = analogRead(6); // A6 (20)
 
     long targetAttack  = map(potAttack,  0, 1023, 10, 30000);   // 1ms - 3s (x10)
     long targetDecay   = map(potDecay,   0, 1023, 10, 30000);   // 1ms - 3s (x10)
@@ -165,22 +177,57 @@ void updateEnvelopeFromPots() {
     envRelease = alpha * targetRelease + (1.0f - alpha) * envRelease;
 
     for (int i = 0; i < 4; ++i) {
-        envelope[i].attack(envAttack / 1000.0f);   // ms -> segundos
-        envelope[i].decay(envDecay / 1000.0f);
-        envelope[i].sustain(envSustain / 10000.0f); // 0.0 - 1.0
-        envelope[i].release(envRelease / 1000.0f);
+        env[i]->attack(envAttack / 1000.0f);   // ms -> segundos
+        env[i]->decay(envDecay / 1000.0f);
+        env[i]->sustain(envSustain / 10000.0f); // 0.0 - 1.0
+        env[i]->release(envRelease / 1000.0f);
     }
+}
 
-    /*
-    Serial.print("Env: A=");
-    Serial.print(envAttack / 10);    // ms
-    Serial.print(" D=");
-    Serial.print(envDecay / 10);     // ms
-    Serial.print(" S=");
-    Serial.print(envSustain / 100);  // %
-    Serial.print(" R=");
-    Serial.println(envRelease / 10); // ms
-    */
+// Funciones para leer el pin y alternar el estado
+void checkTogglePasoAlto() {
+    int btn = digitalRead(PIN_BTN_PASO_ALTO);
+    if (lastBtnPasoAlto == HIGH && btn == LOW) {
+        pasoAltoActivo = !pasoAltoActivo;
+        actualizarConexiones();
+    }
+    lastBtnPasoAlto = btn;
+}
+
+void checkTogglePasoBajo() {
+    int btn = digitalRead(PIN_BTN_PASO_BAJO);
+    if (lastBtnPasoBajo == HIGH && btn == LOW) {
+        pasoBajoActivo = !pasoBajoActivo;
+        actualizarConexiones();
+    }
+    lastBtnPasoBajo = btn;
+}
+
+void checkToggleBitcrusher() {
+    int btn = digitalRead(PIN_BTN_BITCRUSHER);
+    if (lastBtnBitcrusher == HIGH && btn == LOW) {
+        bitcrusherActivo = !bitcrusherActivo;
+        actualizarConexiones();
+    }
+    lastBtnBitcrusher = btn;
+}
+
+void checkToggleFlanger() {
+    int btn = digitalRead(PIN_BTN_FLANGER);
+    if (lastBtnFlanger == HIGH && btn == LOW) {
+        flangerActivo = !flangerActivo;
+        actualizarConexiones();
+    }
+    lastBtnFlanger = btn;
+}
+
+void checkToggleReverb() {
+    int btn = digitalRead(PIN_BTN_REVERB);
+    if (lastBtnReverb == HIGH && btn == LOW) {
+        reverbActivo = !reverbActivo;
+        actualizarConexiones();
+    }
+    lastBtnReverb = btn;
 }
 
 void printAudioMemoryUsage() {
@@ -191,35 +238,52 @@ void printAudioMemoryUsage() {
   Serial.println(" bloques usados");
 }
 
-void printButtonStates() {
-    int stateDo  = digitalRead(2);
-    int stateMi  = digitalRead(3);
-    int stateSol = digitalRead(4);
-    int stateLa  = digitalRead(5);
-
-    Serial.print("Botones: DO=");
-    Serial.print(stateDo == LOW ? "ON" : "OFF");
-    Serial.print(" MI=");
-    Serial.print(stateMi == LOW ? "ON" : "OFF");
-    Serial.print(" SOL=");
-    Serial.print(stateSol == LOW ? "ON" : "OFF");
-    Serial.print(" LA=");
-    Serial.println(stateLa == LOW ? "ON" : "OFF");
+void printBtnStatis() {
+  Serial.print("Botones: ");
+  Serial.print("PA: ");
+  Serial.print(pasoAltoActivo ? "ON" : "OFF");
+  Serial.print(", PB: ");
+  Serial.print(pasoBajoActivo ? "ON" : "OFF");
+  Serial.print(", BC: ");
+  Serial.print(bitcrusherActivo ? "ON" : "OFF");
+  Serial.print(", FL: ");
+  Serial.print(flangerActivo ? "ON" : "OFF");
+  Serial.print(", RV: ");
+  Serial.print(reverbActivo ? "ON" : "OFF");
+  Serial.print(", Vol: ");
+  Serial.print(currentVolume, 2);
+  Serial.print(" (");
+  Serial.print((int)(currentVolume * 100));
+  Serial.print(")");
+  Serial.print(", Env: A=");
+  Serial.print(envAttack / 10);    // ms
+  Serial.print(" D=");
+  Serial.print(envDecay / 10);     // ms
+  Serial.print(" S=");
+  Serial.print(envSustain / 100);  // %
+  Serial.print(" R=");
+  Serial.println(envRelease / 10); // ms
 }
 
 void setup() {
+  pinMode(PIN_BTN_PASO_ALTO, INPUT_PULLUP);
+  pinMode(PIN_BTN_PASO_BAJO, INPUT_PULLUP);
+  pinMode(PIN_BTN_BITCRUSHER, INPUT_PULLUP);
+  pinMode(PIN_BTN_FLANGER, INPUT_PULLUP);
+  pinMode(PIN_BTN_REVERB, INPUT_PULLUP);
+
   Serial.begin(115200);
   AudioMemory(100);
+  myusb.begin();
   audioShield.enable();
-  audioShield.volume(0.5f);
-  mixerOut.gain(0, 0.8f);
+  audioShield.volume(currentVolume);
+  mixerOut.gain(0, 0.5f);
 
   setupVoices();
 
-
   // Inicializa parámetros
-  highPassFilterParameters.setParams(highPassFilter.GetCutoff(), highPassFilter.GetResonance());
-  lowPassFilterParameters.setParams(lowPassFilter.GetCutoff(), lowPassFilter.GetResonance());
+  highPassFilterParameters.setParams(highPassFilter[0].GetCutoff(), highPassFilter[0].GetResonance());
+  lowPassFilterParameters.setParams(lowPassFilter[0].GetCutoff(), lowPassFilter[0].GetResonance());
   bitcrusherParameters.setParams(bitcrusher.GetBits(), bitcrusher.GetSampleRate());
   flangerParameters.setParams(flanger.getOffset(), flanger.getDepth(), flanger.getRate());
   reverbParameters.setParams(reverb.getRoomSize(), reverb.getDamping());
@@ -227,25 +291,41 @@ void setup() {
   actualizarConexiones(); // Conecta todo según estado de efectos.
 }
 
+unsigned long lastDebug = 0;
 void loop() {
-  btnController.update();
+  midiController.update();
   //updateVolumeFromPot();
   //updateEnvelopeFromPots();
+  vManager.update();
+  checkTogglePasoAlto();
+  checkTogglePasoBajo();
+  checkToggleBitcrusher();
+  checkToggleFlanger();
+  checkToggleReverb();
 
-  printButtonStates();
+  printBtnStatis();
+
+  /*  if (millis() - lastDebug > 2000) {  // Cada 2 segundos
+        vManager.debugStatus();
+        lastDebug = millis();
+    }*/
 
   // Filtro paso alto (bypass modificando corte)
-  if (pasoAltoActivo) {
-    highPassFilter.setParams(highPassFilterParameters.GetCutoff(), highPassFilterParameters.GetResonance());
-  } else {
-    highPassFilter.setParams(0.0, 0.5);
+  for (int i = 0; i < 4; ++i) {
+    if (pasoAltoActivo) {
+      highPassFilter[i].setParams(highPassFilterParameters.GetCutoff(), highPassFilterParameters.GetResonance());
+    } else {
+      highPassFilter[i].setParams(0.0, 0.5);
+    }
   }
 
   // Filtro paso bajo
-  if (pasoBajoActivo) {
-    lowPassFilter.setParams(lowPassFilterParameters.GetCutoff(), lowPassFilterParameters.GetResonance());
-  } else {
-    lowPassFilter.setParams(22050.0, 0.7);
+  for (int i = 0; i < 4; ++i) {
+    if (pasoBajoActivo) {
+      lowPassFilter[i].setParams(lowPassFilterParameters.GetCutoff(), lowPassFilterParameters.GetResonance());
+    } else {
+      lowPassFilter[i].setParams(22050.0, 0.7);
+    }
   }
 
   // Parámetros de efectos
