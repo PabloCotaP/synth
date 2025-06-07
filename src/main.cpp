@@ -15,6 +15,10 @@
 #define PIN_BTN_BITCRUSHER   2
 #define PIN_BTN_FLANGER      3
 #define PIN_BTN_REVERB       4
+#define PIN_DIP_SINE         28
+#define PIN_DIP_SQUARE       29
+#define PIN_DIP_TRIANGLE     30
+#define PIN_DIP_SAW          31
 
 // Variables para guardar el último estado de cada botón
 int lastBtnPasoAlto    = HIGH;
@@ -62,6 +66,7 @@ AudioConnection* patchCordEnvToMixer[4];
 
 float currentVolume = 0.6f, targetVolume = 0.6f; // Volumen inicial
 long envAttack = 1000, envDecay = 1000, envSustain = 5000, envRelease = 2000; // valores *10 para más precisión
+int waveformType = WAVEFORM_SINE; // Tipo de onda por defecto
 
 void setupVoices() {
     for (int i = 0; i < 4; ++i) {
@@ -148,8 +153,27 @@ void actualizarConexiones() {
   }
 }
 
+void updateWaveformFromDip() {
+    int dipSine     = digitalRead(PIN_DIP_SINE);
+    int dipSquare   = digitalRead(PIN_DIP_SQUARE);
+    int dipTriangle = digitalRead(PIN_DIP_TRIANGLE);
+    int dipSaw      = digitalRead(PIN_DIP_SAW);
+
+    // DIP activo = LOW (por pullup)
+    int activeCount = (dipSine == LOW) + (dipSquare == LOW) + (dipTriangle == LOW) + (dipSaw == LOW);
+
+    waveformType = WAVEFORM_SINE; // Por defecto
+
+    if (activeCount == 1) {
+        if (dipSine == LOW)      waveformType = WAVEFORM_SINE;
+        if (dipSquare == LOW)    waveformType = WAVEFORM_SQUARE;
+        if (dipTriangle == LOW)  waveformType = WAVEFORM_TRIANGLE;
+        if (dipSaw == LOW)       waveformType = WAVEFORM_SAWTOOTH;
+    }
+}
+
 void updateVolumeFromPot() {
-    int potValue = analogRead(1); // Lee el pin A1 (15)
+    int potValue = analogRead(8); // Lee el pin A8
     float target = map(potValue, 0, 1023, 0, 80) / 100.0f; // 0.0 - 0.8
     const float alpha = 0.15f; // Suavidad EMA (0.1 muy suave, 0.3 más rápido)
     currentVolume = alpha * target + (1.0f - alpha) * currentVolume;
@@ -160,9 +184,9 @@ void updateVolumeFromPot() {
 
 void updateEnvelopeFromPots() {
     int potAttack  = analogRead(0); // A0 (14)
-    int potDecay   = analogRead(2); // A2 (16)
-    int potSustain = analogRead(3); // A3 (17) 
-    int potRelease = analogRead(6); // A6 (20)
+    int potDecay   = analogRead(1); // A2 (16)
+    int potSustain = analogRead(2); // A3 (17) 
+    int potRelease = analogRead(3); // A6 (20)
 
     long targetAttack  = map(potAttack,  0, 1023, 10, 30000);   // 1ms - 3s (x10)
     long targetDecay   = map(potDecay,   0, 1023, 10, 30000);   // 1ms - 3s (x10)
@@ -239,7 +263,12 @@ void printAudioMemoryUsage() {
 }
 
 void printBtnStatis() {
-  Serial.print("Botones: ");
+  Serial.print("Forma de onda: ");
+  Serial.print(waveformType == WAVEFORM_SINE ? "SINE" :
+                 waveformType == WAVEFORM_SQUARE ? "SQUARE" :
+                 waveformType == WAVEFORM_TRIANGLE ? "TRIANGLE" :
+                 waveformType == WAVEFORM_SAWTOOTH ? "SAWTOOTH" : "UNKNOWN");
+  Serial.print(", Botones: ");
   Serial.print("PA: ");
   Serial.print(pasoAltoActivo ? "ON" : "OFF");
   Serial.print(", PB: ");
@@ -271,6 +300,10 @@ void setup() {
   pinMode(PIN_BTN_BITCRUSHER, INPUT_PULLUP);
   pinMode(PIN_BTN_FLANGER, INPUT_PULLUP);
   pinMode(PIN_BTN_REVERB, INPUT_PULLUP);
+  pinMode(PIN_DIP_SINE, INPUT_PULLUP);
+  pinMode(PIN_DIP_SQUARE, INPUT_PULLUP);
+  pinMode(PIN_DIP_TRIANGLE, INPUT_PULLUP);
+  pinMode(PIN_DIP_SAW, INPUT_PULLUP);
 
   Serial.begin(115200);
   AudioMemory(100);
@@ -293,9 +326,10 @@ void setup() {
 
 unsigned long lastDebug = 0;
 void loop() {
-  midiController.update();
-  //updateVolumeFromPot();
-  //updateEnvelopeFromPots();
+  updateWaveformFromDip();
+  midiController.update(waveformType);
+  updateVolumeFromPot();
+  updateEnvelopeFromPots();
   vManager.update();
   checkTogglePasoAlto();
   checkTogglePasoBajo();

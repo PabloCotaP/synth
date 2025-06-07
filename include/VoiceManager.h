@@ -14,7 +14,7 @@ public:
         }
     }
 
-    void noteOn(uint8_t note) {
+    void noteOn(uint8_t note, int waveformType = SINE) {
         // Si la nota ya está activa, no hacer nada
         for (int i = 0; i < NUM_VOICES; ++i) {
             if (voices[i]->isActive() && voices[i]->getNote() == note) return;
@@ -22,7 +22,7 @@ public:
         // Busca una voz libre
         for (int i = 0; i < NUM_VOICES; ++i) {
             if (!voices[i]->isActive()) {
-                voices[i]->noteOn(note);
+                voices[i]->noteOn(note, waveformType);
                 mixer.gain(i, 0.2);
                 voiceStartTime[i] = millis();
                 return;
